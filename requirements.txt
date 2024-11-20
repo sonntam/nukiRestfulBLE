@@ -1,0 +1,6 @@
+--extra-index-url https://www.piwheels.org/simple
+
+async-timeout==4.0.3
+flask[async]==3.0.3
+flasgger==0.9.7.1
+pyNukiBT @git+https://github.com/ronengr/pyNukiBT.git@0.0.16
