@@ -70,6 +70,23 @@ docker run -d --rm --name nukiService \
     -v /var/run/dbus:/var/run/dbus nukiRestfulBLE
 ```
 
+## Example usage using cURL
+
+Suppose your Nuki device has got "54:D2:72:AA:AA:AA" as MAC address. You can find it e.g. using the `/scan` method.
+Then the following calls can be made:
+
+```bash
+curl -X GET http://127.0.0.1:51001/scan
+curl -X POST http://127.0.0.1:51001/pair -H "Content-Type: application/json" -d '{"address": "54:D2:72:AA:AA:AA"}'
+curl -X GET http://127.0.0.1:51001/listPaired
+curl -X GET http://127.0.0.1:51001/state?address=54:D2:72:AA:AA:AA
+curl -X POST http://127.0.0.1:51001/lock -H "Content-Type: application/json" -d '{"address": "54:D2:72:AA:AA:AA"}'
+curl -X POST http://127.0.0.1:51001/unlock -H "Content-Type: application/json" -d '{"address": "54:D2:72:AA:AA:AA"}'
+curl -X POST http://127.0.0.1:51001/unlatch -H "Content-Type: application/json" -d '{"address": "54:D2:72:AA:AA:AA"}'
+curl -X POST http://127.0.0.1:51001/unpair -H "Content-Type: application/json" -d '{"address": "54:D2:72:AA:AA:AA"}'
+```
+
+
 ## Contributing
 
 Contributions are welcome! Please follow these steps to contribute:
@@ -83,6 +100,8 @@ Contributions are welcome! Please follow these steps to contribute:
 ## Disclaimer
 
 I cannot be held responsible for any security problems with this service. It was intended for private use in secured environments only. Also I'm not good at programming python - please beware!
+
+This has been tested and found working on a Raspberry Pi5 with it's integrated bluetooth adapter.
 
 ## License
 
