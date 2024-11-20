@@ -7,7 +7,9 @@ This is a Python-based REST API server service that allows pairing with and cont
 - [Usage](#usage)
 - [API Documentation](#api-documentation)
 - [Docker](#docker)
+- [Example usage using cURL](#example-usage-using-curl)
 - [Contributing](#contributing)
+- [Disclaimer](#disclaimer)
 - [License](#license)
 
 ## Installation
