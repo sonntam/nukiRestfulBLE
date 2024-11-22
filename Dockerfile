@@ -15,5 +15,5 @@ COPY ./restserver.py /app/
 
 EXPOSE 51001
 
-#CMD ["python", "restserver.py"]
-CMD ["tail", "-f", "/dev/null"]
+CMD ["python", "restserver.py"]
+#CMD ["tail", "-f", "/dev/null"]
