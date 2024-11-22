@@ -54,14 +54,14 @@ You can view the complete REST API documentation by accessing the following URL 
 
 ## Docker
 
-A `Dockerfile` is provided that can run the service within a Docker container.
+A `Dockerfile` is provided that can create an image in order to run the service within a Docker container.
 
 To build the Docker image, use the following command:
 ```bash
 docker build --network=host -t nukiRestfulBLE .
 ```
 
-As the docker container needs access to bluetooth devices you have to run it wit hthe `SYS_ADMIN` and `NET_ADMIN` capabilities. Also `/var/run/dbus` has to be mapped. You may run the container using the following command
+As the docker container needs access to bluetooth devices you have to run it with the `SYS_ADMIN` and `NET_ADMIN` capabilities. Also `/var/run/dbus` has to be mapped. You may run the container using the following command
 
 ```bash
 docker rm -f nukiService 
