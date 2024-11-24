@@ -32,6 +32,8 @@ swagger_config = {
 
 app = Flask(__name__)
 swagger = Swagger(app, config=swagger_config, merge=True)
+scanner = BleakScanner()
+
 
 config = {}
 configPath = "./settings/config.json"
@@ -145,7 +147,7 @@ async def pair():
         # Perform your logic here with the MAC address
         logger.info(f"Received MAC address: {address}")
         
-        ble_device = await BleakScanner.find_device_by_address(address)
+        ble_device = await scanner.find_device_by_address(address)
 
         if ble_device == None:
             raise ConnectionError(f"Device with address {address} is not reachable.")
@@ -157,7 +159,7 @@ async def pair():
             bridge_public_key=base64.b64decode(config['publicKey']), 
             bridge_private_key=base64.b64decode(config['privateKey']),
             app_id=config['appId'], name=config['appName'], client_type=client_type, ble_device=ble_device, 
-            get_ble_device=lambda addr: BleakScanner.find_device_by_address(address))
+            get_ble_device=lambda addr: scanner.find_device_by_address(address))
 
         await device.connect()
 
@@ -264,17 +266,17 @@ async def scan():
     """
 
     try:
-        async with BleakScanner() as scanner:
-            await scanner.stop()
-            devices = await scanner.discover()
-            deviceCandidates = []
-            for device in devices:
-                if (device.name and device.name.startswith("Nuki")) or (device.address and device.address.upper().startswith('52:D2:72:')):
-                    logger.info(f"Found possible Nuki device {device.name}, Address: {device.address}, RSSI: {device.rssi}")
-                    deviceCandidates.append(device)
-            return jsonify({'message': f"Found {len(deviceCandidates)} possible Nuki devices", 
-                            'devices': list(map(lambda x: { 'name': x.name, 'address': x.address },deviceCandidates))}
-            ), 200
+        
+        await scanner.stop()
+        devices = await scanner.discover()
+        deviceCandidates = []
+        for device in devices:
+            if (device.name and device.name.startswith("Nuki")) or (device.address and device.address.upper().startswith('52:D2:72:')):
+                logger.info(f"Found possible Nuki device {device.name}, Address: {device.address}, RSSI: {device.rssi}")
+                deviceCandidates.append(device)
+        return jsonify({'message': f"Found {len(deviceCandidates)} possible Nuki devices", 
+                        'devices': list(map(lambda x: { 'name': x.name, 'address': x.address },deviceCandidates))}
+        ), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -626,7 +628,7 @@ async def get_paired_device(address: str) -> Tuple[dict,pyNukiBT.NukiDevice,BLED
     if pairedDevice == None:
         raise LookupError(f'Device with address {address} has not been paired yet.')
 
-    ble_device: BLEDevice = await BleakScanner.find_device_by_address(address)
+    ble_device: BLEDevice = await scanner.find_device_by_address(address)
     device: pyNukiBT.NukiDevice = pyNukiBT.NukiDevice(address=address, 
             auth_id=base64.b64decode(pairedDevice['authId']), 
             nuki_public_key=base64.b64decode(pairedDevice['devicePublicKey']),
@@ -634,7 +636,7 @@ async def get_paired_device(address: str) -> Tuple[dict,pyNukiBT.NukiDevice,BLED
             bridge_private_key=base64.b64decode(config['privateKey']),
             app_id=config['appId'], name=config['appName'], client_type=pyNukiBT.NukiConst.NukiClientType.BRIDGE, 
             ble_device=ble_device, 
-            get_ble_device=lambda addr: BleakScanner.find_device_by_address(address))
+            get_ble_device=lambda addr: scanner.find_device_by_address(address))
 
     return pairedDevice, device, ble_device
 
