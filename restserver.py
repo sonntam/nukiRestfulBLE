@@ -5,6 +5,7 @@ import base64
 import os
 import pyNukiBT
 import random
+import threading
 import logging
 import asyncio
 from typing import List, Dict, Tuple
@@ -12,6 +13,7 @@ from bleak import BleakScanner
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from nacl.public import PrivateKey
+from job_queue import JobQueue
 
 swagger_config = {
     "headers": [],
@@ -30,15 +32,21 @@ swagger_config = {
     "description": "This is the description of nukiRestful, a REST API to control Nuki locks via Bluetooth Low-Energy BLE. It is powered by Flask, pyNukiBT, bleak and Flasgger",
 }
 
+# Flask & Swaggedr
 app = Flask(__name__)
 swagger = Swagger(app, config=swagger_config, merge=True)
-scanner = BleakScanner()
 
-
+# Config
 config = {}
 configPath = "./settings/config.json"
+
+# Logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# Other globals
+scanner = BleakScanner()
+job_queue = JobQueue()
 
 @app.get('/listPaired')
 async def listPaired():
@@ -78,32 +86,37 @@ async def listPaired():
     """
 
     try:
-        devices = []
-        for pairedDevice in config['pairedDevices']:
-            address = pairedDevice['address']
-            _, device, ble_device = await get_paired_device( address )
+        devices = await job_queue.submit_job(async_get_registered_devices, config=config)
+            
+        return jsonify({
+            'message': f'Found {len(devices)} registered devices',
+            'devices': devices
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+async def async_get_registered_devices(config: Dict[str, any]):
+    devices = []
+    for pairedDevice in config['pairedDevices']:
+        address = pairedDevice['address']
+        _, device, ble_device = await async_get_paired_device( address, config )
 
             # Update name and id if possible
-            if ble_device != None:
-                logger.info(f"Updating info of device {address}...")
-                await device.connect()
-                await device.update_state()
-                update_and_save_device_info(device, address)
-                await device.disconnect()
+        if ble_device != None:
+            logger.info(f"Updating info of device {address}...")
+            await device.connect()
+            await device.update_state()
+            update_and_save_device_info(device, address, config)
+            await device.disconnect()
 
-            devices.append({
+        devices.append({
                 'address': address,
                 'isReachable': ble_device != None,
                 'name': pairedDevice['name'],
                 'id': pairedDevice['id']
             })
-            
-        return jsonify({
-            'message': f'Found {len(config["pairedDevices"])} registered devices',
-            'devices': devices
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        
+    return devices
 
 @app.post('/pair')
 async def pair():
@@ -147,7 +160,8 @@ async def pair():
         # Perform your logic here with the MAC address
         logger.info(f"Received MAC address: {address}")
         
-        ble_device = await scanner.find_device_by_address(address)
+        ble_device = await job_queue.submit_job(scanner.find_device_by_address, device_identifier=address)
+        #ble_device = await scanner.find_device_by_address(device_identifier=address)
 
         if ble_device == None:
             raise ConnectionError(f"Device with address {address} is not reachable.")
@@ -160,10 +174,10 @@ async def pair():
             bridge_private_key=base64.b64decode(config['privateKey']),
             app_id=config['appId'], name=config['appName'], client_type=client_type, ble_device=ble_device, 
             get_ble_device=lambda addr: scanner.find_device_by_address(address))
+        
+        await job_queue.submit_job( device.connect )
 
-        await device.connect()
-
-        pairingResult = await device.pair()
+        pairingResult = await job_queue.submit_job( device.pair )
 
         config['pairedDevices'] = replace_or_add_entry_by_address(
             config['pairedDevices'], 
@@ -176,7 +190,7 @@ async def pair():
         
         save_config(configPath, config)
 
-        await device.disconnect()
+        await job_queue.submit_job( device.disconnect )
     
         # Return a success response
         return jsonify({'message': 'Device registered successfully'}), 200
@@ -267,8 +281,8 @@ async def scan():
 
     try:
         
-        await scanner.stop()
-        devices = await scanner.discover()
+        await job_queue.submit_job( scanner.stop )
+        devices = await job_queue.submit_job( scanner.discover )
         deviceCandidates = []
         for device in devices:
             if (device.name and device.name.startswith("Nuki")) or (device.address and device.address.upper().startswith('52:D2:72:')):
@@ -312,15 +326,15 @@ async def lock():
         # Get JSON data from the request
         address: str = request.get_json()['address']
         
-        pairedDevice, device, ble_device = await get_paired_device(address)
+        pairedDevice, device, ble_device = await job_queue.submit_job( async_get_paired_device, address=address, config=config)
 
         if ble_device == None:
             raise ConnectionError(f"Device with address {address} is not reachable.")
         
-        await device.connect()
-        await device.update_state()
-        await device.lock()
-        await device.disconnect()
+        await job_queue.submit_job( device.connect )
+        await job_queue.submit_job( device.update_state )
+        await job_queue.submit_job( device.lock )
+        await job_queue.submit_job( device.disconnect )
 
         return jsonify({'message': 'Locked successfully'}), 200
     except Exception as e:
@@ -358,15 +372,15 @@ async def unlock():
         # Get JSON data from the request
         address: str = request.get_json()['address']
         
-        pairedDevice, device, ble_device = await get_paired_device(address)
+        pairedDevice, device, ble_device = await job_queue.submit_job( async_get_paired_device, address=address, config=config)
         
         if ble_device == None:
             raise ConnectionError(f"Device with address {address} is not reachable.")
 
-        await device.connect()
-        await device.update_state()
-        await device.unlock()
-        await device.disconnect()
+        await job_queue.submit_job( device.connect )
+        await job_queue.submit_job( device.update_state )
+        await job_queue.submit_job( device.unlock )
+        await job_queue.submit_job( device.disconnect )
 
         return jsonify({'message': 'Unlocked successfully'}), 200
     except Exception as e:
@@ -404,15 +418,15 @@ async def unlatch():
         # Get JSON data from the request
         address: str = request.get_json()['address']
         
-        pairedDevice, device, ble_device = await get_paired_device(address)
+        pairedDevice, device, ble_device = await job_queue.submit_job( async_get_paired_device, address=address, config=config)
         
         if ble_device == None:
             raise ConnectionError(f"Device with address {address} is not reachable.")
 
-        await device.connect()
-        await device.update_state()
-        await device.unlatch()
-        await device.disconnect()
+        await job_queue.submit_job( device.connect )
+        await job_queue.submit_job( device.update_state )
+        await job_queue.submit_job( device.unlatch )
+        await job_queue.submit_job( device.disconnect )
 
         return jsonify({'message': 'Unlatched successfully'}), 200
     except Exception as e:
@@ -496,21 +510,20 @@ async def state():
         500:
             description: Error while retrieving the device state
     """
-
     try:
         # Your logic for getting the state goes here
         # Get JSON data from the request
         address: str = request.args.get('address')
         
-        pairedDevice, device, ble_device = await get_paired_device(address)
+        pairedDevice, device, ble_device = await job_queue.submit_job( async_get_paired_device, address=address, config=config)
 
         if ble_device == None:
             raise ConnectionError(f"Device with address {address} is not reachable.")
 
-        await device.connect()
-        await device.update_state()
-        update_and_save_device_info(device, address)
-        await device.disconnect()
+        await job_queue.submit_job( device.connect )
+        await job_queue.submit_job( device.update_state )
+        update_and_save_device_info(device, address, config)
+        await job_queue.submit_job( device.disconnect )
 
         state = {
             'name': pairedDevice['name'],
@@ -533,6 +546,9 @@ async def state():
                 'deviceStateValues': ', '.join([e for e in pyNukiBT.NukiLockConst.State.ksymapping.values()])
             }
         }
+
+        del device
+        del ble_device
 
         return jsonify(state), 200
     except Exception as e:
@@ -601,7 +617,7 @@ def replace_or_add_entry_by_address(data_list: List[any], new_entry: Dict[str, a
 
     return data_list
 
-def update_and_save_device_info(device: pyNukiBT.NukiDevice, address: str):
+def update_and_save_device_info(device: pyNukiBT.NukiDevice, address: str, config: Dict[str, any]):
     
     # Get Paired device entry from config
     # Check if the address is provided
@@ -618,7 +634,7 @@ def update_and_save_device_info(device: pyNukiBT.NukiDevice, address: str):
 
     save_config(configPath, config)
 
-async def get_paired_device(address: str) -> Tuple[dict,pyNukiBT.NukiDevice,BLEDevice]:
+async def async_get_paired_device(address: str, config: Dict[str, any]) -> Tuple[dict,pyNukiBT.NukiDevice,BLEDevice]:
     # Check if the address is provided
     if not address:
         raise ValueError('MAC address is missing')
@@ -628,7 +644,7 @@ async def get_paired_device(address: str) -> Tuple[dict,pyNukiBT.NukiDevice,BLED
     if pairedDevice == None:
         raise LookupError(f'Device with address {address} has not been paired yet.')
 
-    ble_device: BLEDevice = await scanner.find_device_by_address(address)
+    ble_device: BLEDevice = await BleakScanner.find_device_by_address(address)
     device: pyNukiBT.NukiDevice = pyNukiBT.NukiDevice(address=address, 
             auth_id=base64.b64decode(pairedDevice['authId']), 
             nuki_public_key=base64.b64decode(pairedDevice['devicePublicKey']),
@@ -636,12 +652,14 @@ async def get_paired_device(address: str) -> Tuple[dict,pyNukiBT.NukiDevice,BLED
             bridge_private_key=base64.b64decode(config['privateKey']),
             app_id=config['appId'], name=config['appName'], client_type=pyNukiBT.NukiConst.NukiClientType.BRIDGE, 
             ble_device=ble_device, 
-            get_ble_device=lambda addr: scanner.find_device_by_address(address))
+            get_ble_device=lambda addr: BleakScanner.find_device_by_address(address))
 
     return pairedDevice, device, ble_device
 
 if __name__ == '__main__':
     config = load_config(configPath)
     save_config(configPath, config)
+    job_queue.start()
     #app.run(debug=True, port=config['apiPort'])
     app.run(host=config['apiBindAddress'], port=config['apiPort'])
+
