@@ -12,6 +12,7 @@ RUN pip install -r requirements.txt
 RUN rm requirements.txt
 
 COPY ./restserver.py /app/
+COPY ./job_queue.py /app/
 
 EXPOSE 51001
 
